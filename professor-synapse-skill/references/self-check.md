@@ -5,7 +5,7 @@ A repeatable verification of a Professor Synapse install — run it after an upd
 Two ways to use it:
 
 - **Automated:** the steps below are scripted; run each and confirm the expected result.
-- **Hand to your assistant:** paste the "Prompt" block (further down) into your AI assistant and have it report PASS/FAIL per step.
+- **Hand to Claude:** paste the "Prompt for Claude" block (further down) into Claude Desktop and have it report PASS/FAIL per step.
 
 > **Note on side effects:** steps 4–6 write a throwaway record (`tags: selfcheck`) to the **installed** store and then `forget` it. That's intentional — it proves reinforce/forget against the real store. Step 6 cleans it up. Nothing else is mutated.
 
@@ -22,15 +22,21 @@ Expect the current release version (e.g. `2.1.0`). Compare against `github.com/P
 python3 scripts/test_memory.py
 python3 scripts/test_summon.py
 ```
-Both must end in `OK` (44 and 13 cases respectively).
+Both must end in `OK` (80 and 27 cases respectively).
 
 **3. Summoning — happy path, ambiguity, no-match**
 ```bash
 python3 scripts/summon.py memory-agent --no-reinforce          # exact slug
-python3 scripts/summon.py "what do you remember" --no-reinforce # fuzzy match
+python3 scripts/summon.py "what do you remember" --no-reinforce # trigger fires
 python3 scripts/summon.py "underwater basketweaving"; echo "exit=$?"
 ```
-Expect: the first two print a boot package with **Persona & Instructions**, **Recalled context**, and **Resources you can load** sections; the third prints "No agent matches", lists existing agents, and exits `3`.
+Expect: the first two print a boot package with **Persona & Instructions**, **Recalled context**, and **Resources you can load** sections; the second also prints a `Matched by: trigger fired: ...` line. The third prints "No agent matches", lists existing agents, and exits `3`.
+
+**3b. The summon gate refuses a coincidental match**
+```bash
+python3 scripts/summon.py "create a lesson tracker doc for the course"; echo "exit=$?"
+```
+Expect: **"No confident match"**, a scored candidate table, and **no `# Summoned:` header** — the words overlap some agents but no full trigger fired, so nothing is adopted. Exits `0` when there are candidates to show. If this prints a boot package, the strict gate has regressed and agents can be mis-routed onto the wrong procedure.
 
 **4. Recall reinforces by default + reads the real store**
 ```bash
@@ -65,9 +71,9 @@ python3 scripts/memory.py recall --query selfcheck --no-reinforce \
 ```
 Expect `remaining: 0` — the dropped record is excluded from recall.
 
-## Prompt
+## Prompt for Claude
 
-Paste this into your AI assistant to have it run the check and report:
+Paste this into Claude Desktop to have it run the check and report:
 
 ```
 Run the Professor Synapse self-check (references/self-check.md). For each step,

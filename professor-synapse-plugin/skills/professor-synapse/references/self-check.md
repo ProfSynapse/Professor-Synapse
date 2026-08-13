@@ -22,15 +22,21 @@ Expect the current release version (e.g. `2.1.0`). Compare against `github.com/P
 python3 scripts/test_memory.py
 python3 scripts/test_summon.py
 ```
-Both must end in `OK` (44 and 13 cases respectively).
+Both must end in `OK` (80 and 27 cases respectively).
 
 **3. Summoning — happy path, ambiguity, no-match**
 ```bash
 python3 scripts/summon.py memory-agent --no-reinforce          # exact slug
-python3 scripts/summon.py "what do you remember" --no-reinforce # fuzzy match
+python3 scripts/summon.py "what do you remember" --no-reinforce # trigger fires
 python3 scripts/summon.py "underwater basketweaving"; echo "exit=$?"
 ```
-Expect: the first two print a boot package with **Persona & Instructions**, **Recalled context**, and **Resources you can load** sections; the third prints "No agent matches", lists existing agents, and exits `3`.
+Expect: the first two print a boot package with **Persona & Instructions**, **Recalled context**, and **Resources you can load** sections; the second also prints a `Matched by: trigger fired: ...` line. The third prints "No agent matches", lists existing agents, and exits `3`.
+
+**3b. The summon gate refuses a coincidental match**
+```bash
+python3 scripts/summon.py "create a lesson tracker doc for the course"; echo "exit=$?"
+```
+Expect: **"No confident match"**, a scored candidate table, and **no `# Summoned:` header** — the words overlap some agents but no full trigger fired, so nothing is adopted. Exits `0` when there are candidates to show. If this prints a boot package, the strict gate has regressed and agents can be mis-routed onto the wrong procedure.
 
 **4. Recall reinforces by default + reads the real store**
 ```bash
