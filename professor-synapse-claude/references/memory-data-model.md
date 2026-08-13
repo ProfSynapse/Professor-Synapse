@@ -96,9 +96,11 @@ The `insight` kind is a **synthesised roll-up** of a cluster of related records 
 | `seq` | INTEGER PK AUTOINCREMENT | |
 | `ts` | TEXT (UTC datetime) | |
 | `agent` | TEXT | who acted |
-| `action` | TEXT | `archive`, `drop`, `resurface`, `decision`, `note`, `fact`, `lesson` |
+| `action` | TEXT | `archive`, `drop`, `resurface`, `decision`, `note`, `fact`, `lesson`, `amend` |
 | `item_id` | TEXT | |
 | `summary` | TEXT | |
+
+`amend` updates only explicitly supplied fields on a non-dropped long-term record, preserves its id and graph edges, refreshes `last_used`, and records the changed field names in `summary`.
 
 ### edge (knowledge graph — undirected weighted link between two records)
 | column | type | notes |

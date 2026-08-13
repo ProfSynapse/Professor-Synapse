@@ -148,6 +148,77 @@ class LongTerm(MemTest):
         self.assertEqual(counts["b"]["longterm"], 1)
 
 
+class Amend(MemTest):
+    def seed(self, text, agent="alpha", **kw):
+        argv = ["--agent", agent, "record", "--kind", "fact", "--text", text]
+        for key, value in kw.items():
+            argv += [f"--{key}", *(value if isinstance(value, list) else [value])]
+        self.cli(*argv)
+        return self.id_by_text(text)
+
+    def test_updates_selected_fields_in_place_and_preserves_graph(self):
+        target = self.seed("original record", tags=["initial"], confidence="low")
+        neighbour = self.seed("related record")
+        self.cli("link", "--a", target, "--b", neighbour)
+
+        self.cli("--agent", "alpha", "amend", "--id", target,
+                 "--text", "revised record", "--tags", "revised", "stable",
+                 "--constraints", "retain associations", "--confidence", "high",
+                 "--source", "confirmed source")
+
+        con = self.db()
+        row = con.execute(
+            "SELECT id,agent,text,tags,constraints,confidence,source,last_used "
+            "FROM record WHERE id=?", (target,)).fetchone()
+        edge_count = con.execute(
+            "SELECT COUNT(*) FROM edge WHERE a=? AND b=?",
+            tuple(sorted((target, neighbour)))).fetchone()[0]
+        event = con.execute(
+            "SELECT action,item_id,summary FROM changelog ORDER BY seq DESC LIMIT 1"
+        ).fetchone()
+        con.close()
+
+        self.assertEqual(row[0], target)
+        self.assertEqual(row[1], "alpha")
+        self.assertEqual(row[2], "revised record")
+        self.assertEqual(json.loads(row[3]), ["revised", "stable"])
+        self.assertEqual(json.loads(row[4]), ["retain associations"])
+        self.assertEqual(row[5], "high")
+        self.assertEqual(row[6], "confirmed source")
+        self.assertTrue(row[7])
+        self.assertEqual(edge_count, 1)
+        self.assertEqual(event[0:2], ("amend", target))
+        self.assertIn("text", event[2])
+
+    def test_omitted_fields_stay_unchanged_and_lists_can_be_cleared(self):
+        target = self.seed("stable record", tags=["one", "two"], source="source")
+        self.cli("--agent", "alpha", "amend", "--id", target,
+                 "--tags", "--source", "")
+        con = self.db()
+        row = con.execute(
+            "SELECT text,tags,source FROM record WHERE id=?", (target,)).fetchone()
+        con.close()
+        self.assertEqual(row[0], "stable record")
+        self.assertEqual(json.loads(row[1]), [])
+        self.assertIsNone(row[2])
+
+    def test_rejects_unknown_dropped_and_wrong_agent_records(self):
+        target = self.seed("protected record")
+        with self.assertRaises(SystemExit):
+            self.cli("--agent", "beta", "amend", "--id", target, "--text", "change")
+        with self.assertRaises(SystemExit):
+            self.cli("amend", "--id", "m-00000000", "--text", "change")
+        self.cli("forget", "--ids", target)
+        with self.assertRaises(SystemExit):
+            self.cli("--agent", "alpha", "amend", "--id", target, "--text", "change")
+
+    def test_requires_a_change_and_nonempty_text(self):
+        target = self.seed("valid record")
+        with self.assertRaises(SystemExit):
+            self.cli("amend", "--id", target)
+        with self.assertRaises(SystemExit):
+            self.cli("amend", "--id", target, "--text", "   ")
+
 class Search(MemTest):
     def seed(self, text, kind="note", agent="a", **kw):
         argv = ["--agent", agent, "record", "--kind", kind, "--text", text]

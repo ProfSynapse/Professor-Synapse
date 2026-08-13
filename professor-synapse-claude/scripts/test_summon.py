@@ -14,6 +14,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -198,5 +199,15 @@ class SummonTest(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.root, "memory", "memory")))
 
 
+    def test_recall_memory_requests_utf8_decoding(self):
+        payload = {"profile": {"notes": "\u03bb"}, "active": [], "due": [],
+                   "matches": [], "recent": []}
+        completed = summon.subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(payload, ensure_ascii=False), stderr="")
+        with mock.patch.object(summon.subprocess, "run", return_value=completed) as run:
+            result = summon.recall_memory(
+                self.root, "alpha-agent", ["widget"], no_reinforce=True)
+        self.assertEqual(result, payload)
+        self.assertEqual(run.call_args.kwargs["encoding"], "utf-8")
 if __name__ == "__main__":
     unittest.main(verbosity=2)
