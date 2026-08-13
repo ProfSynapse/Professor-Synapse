@@ -971,6 +971,7 @@ def cmd_resurface(root, args):
 def cmd_record(root, args):
     if args.kind not in RECORD_KINDS:
         sys.exit(f"--kind must be one of {sorted(RECORD_KINDS)}")
+    confidence = _check_confidence(args.confidence)
     con = connect_db(root)
     rid = new_id()
     now_ts = utc_now()
@@ -983,7 +984,7 @@ def cmd_record(root, args):
          json.dumps(args.people or []), json.dumps(args.tags or []),
          None, None, "done", args.source, utc_today(), now_ts, None, args.rationale,
          args.goal, args.outcome, json.dumps(args.constraints or []),
-         _check_confidence(args.confidence), args.verify, args.unknowns, now_ts),
+         confidence, args.verify, args.unknowns, now_ts),
     )
     log_event(con, args.agent or DEFAULT_AGENT, args.kind, rid, args.text)
     # Write-time advisory: flag any near-duplicate or high-confidence conflict so the
@@ -1003,6 +1004,67 @@ def cmd_record(root, args):
         print("  → before persisting, consolidate a duplicate (link/forget) or"
               " confirm a conflicting update with the user.")
 
+
+def cmd_amend(root, args):
+    """Update selected fields on a non-dropped long-term record in place.
+
+    This preserves the lifelong record id and graph edges, refreshes last_used,
+    and appends an audit-log entry. Omitted fields stay unchanged; list options
+    may be passed with no values to clear them.
+    """
+    fields = (
+        "type", "text", "people", "tags", "owner", "due", "source",
+        "rationale", "goal", "outcome", "constraints", "confidence",
+        "verify", "unknowns",
+    )
+    changes = {}
+    for field in fields:
+        value = getattr(args, field, None)
+        if value is None:
+            continue
+        if field == "text":
+            value = value.strip()
+            if not value:
+                sys.exit("--text cannot be empty")
+        elif field in ("people", "tags", "constraints"):
+            value = json.dumps(value)
+        elif field == "confidence":
+            value = _check_confidence(value)
+        elif field == "due":
+            value = value or None
+            if value and not _is_iso(value):
+                sys.exit("--due must be YYYY-MM-DD or an empty string to clear")
+        elif field in ("type", "owner", "source", "rationale", "goal",
+                       "outcome", "verify", "unknowns"):
+            value = value or None
+        changes[field] = value
+    if not changes:
+        sys.exit("nothing to amend: pass at least one editable field")
+
+    con = connect_db(root)
+    row = con.execute(
+        "SELECT agent,status FROM record WHERE id=?", (args.id,)).fetchone()
+    if row is None or row[1] == "dropped":
+        con.close()
+        sys.exit(f"unknown (or dropped) record id: {args.id}")
+    record_agent = row[0]
+    if args.agent and args.agent != record_agent:
+        con.close()
+        sys.exit(f"record {args.id} belongs to agent '{record_agent}', not '{args.agent}'")
+
+    changes["last_used"] = utc_now()
+    columns = list(changes)
+    assignments = ", ".join(f"{field}=?" for field in columns)
+    con.execute(
+        f"UPDATE record SET {assignments} WHERE id=?",
+        (*[changes[field] for field in columns], args.id),
+    )
+    changed = [field for field in columns if field != "last_used"]
+    summary = f"amended fields: {', '.join(changed)}"
+    log_event(con, record_agent, "amend", args.id, summary)
+    con.commit()
+    con.close()
+    print(f"amended {args.id} [{record_agent}]: {', '.join(changed)}")
 
 def cmd_check(root, args):
     """Probe before writing: would this proposed record duplicate or contradict
@@ -1699,6 +1761,23 @@ def build_parser():
     rec.add_argument("--verify", help="confidence basis: available evidence + how to get it (the upgrade path)")
     rec.add_argument("--unknowns", help="confidence basis: what remains unknown / unknown-unknown")
 
+    am = sub.add_parser("amend", help="correct selected fields on a live long-term record in place")
+    am.add_argument("--id", required=True)
+    am.add_argument("--type")
+    am.add_argument("--text")
+    am.add_argument("--people", nargs="*")
+    am.add_argument("--tags", nargs="*")
+    am.add_argument("--owner")
+    am.add_argument("--due", help="ISO date YYYY-MM-DD; pass an empty string to clear")
+    am.add_argument("--source")
+    am.add_argument("--rationale")
+    am.add_argument("--goal")
+    am.add_argument("--outcome")
+    am.add_argument("--constraints", nargs="*", help="replaces the gotcha list")
+    am.add_argument("--confidence", help="high | medium | low")
+    am.add_argument("--verify")
+    am.add_argument("--unknowns")
+
     ck = sub.add_parser("check", help="probe whether a proposed record duplicates/contradicts an existing one")
     ck.add_argument("--kind", choices=sorted(RECORD_KINDS), help="kind of the proposed record (sharpens conflict detection)")
     ck.add_argument("--text", required=True)
@@ -1780,7 +1859,7 @@ def build_parser():
 DISPATCH = {
     "read": cmd_read, "profile": cmd_profile, "add": cmd_add, "update": cmd_update,
     "resolve": cmd_resolve, "scan": cmd_scan, "compact": cmd_compact,
-    "resurface": cmd_resurface, "record": cmd_record, "check": cmd_check, "recall": cmd_recall,
+    "resurface": cmd_resurface, "record": cmd_record, "amend": cmd_amend, "check": cmd_check, "recall": cmd_recall,
     "brief": cmd_brief, "agents": cmd_agents, "validate": cmd_validate, "doctor": cmd_doctor,
     "render": cmd_render, "export": cmd_export,
     "link": cmd_link, "unlink": cmd_unlink, "links": cmd_links,

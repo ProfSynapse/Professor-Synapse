@@ -98,6 +98,15 @@ Two things keep this low-friction:
 
 Use the signal to route the gates: a **duplicate** → consolidate (`link` the two, or `forget` the older) instead of stacking a near-copy; a **conflict** → that's an ask-first, confirm the update with the user before an existing high-confidence record is contradicted; **no signal** → just save.
 
+### Amending a long-term record
+
+Use `amend --id <id>` to correct or enrich a non-dropped long-term record without retiring it or changing its lifelong id. Pass only the fields that should change:
+
+```
+python3 scripts/memory.py --agent <slug> amend --id <id> --text "corrected text"
+```
+
+`amend` preserves graph links, refreshes `last_used`, and adds an `amend` changelog entry. Omitted fields remain unchanged. Passing `--people`, `--tags`, or `--constraints` with no values clears that list. Quote arguments according to the active shell so literal metacharacters are preserved.
 ## Linking & the knowledge graph
 
 Memories can be linked into a weighted graph that feeds recall. Edges form two ways:

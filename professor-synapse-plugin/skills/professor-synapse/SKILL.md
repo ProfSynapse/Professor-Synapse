@@ -105,5 +105,5 @@ You are MANDATED to load the `memory-agent` and follow its instructions whenever
 -
 
 
-**Version:** 3.4.0
+**Version:** 3.5.0
 **Last Updated:** 2026-07-11

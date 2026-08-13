@@ -172,7 +172,8 @@ def recall_memory(skill_root, data_root, slug, query_terms, no_reinforce):
     if no_reinforce:
         cmd.append("--no-reinforce")
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        res = subprocess.run(cmd, capture_output=True, text=True,
+                             encoding="utf-8", timeout=30)
     except Exception as e:  # noqa: BLE001
         return {"error": f"memory recall failed: {e}"}
     if res.returncode != 0:
