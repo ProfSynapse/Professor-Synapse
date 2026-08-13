@@ -22,7 +22,7 @@ Expect the current release version (e.g. `2.1.0`). Compare against `github.com/P
 python3 scripts/test_memory.py
 python3 scripts/test_summon.py
 ```
-Both must end in `OK` (80 and 27 cases respectively).
+Both must end in `OK` (80 and 29 cases respectively).
 
 **3. Summoning — happy path, ambiguity, no-match**
 ```bash

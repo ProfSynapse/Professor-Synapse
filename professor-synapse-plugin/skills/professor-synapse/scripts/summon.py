@@ -258,8 +258,25 @@ def resolve_agent(agents, term):
         why = "trigger fired: " + ", ".join(repr(p) for p in phrases)
         return a, [{"agent": a, "score": 1.0, "matched": phrases}], why
     if len(fired) > 1:
-        cands = [{"agent": a, "score": 1.0, "matched": f} for a, f in fired]
-        return None, cands, "multiple agents matched a full trigger"
+        # Several agents fired. Prefer the most SPECIFIC match: a longer
+        # complete trigger phrase is stronger evidence of intent than a
+        # shorter one. "blog image" beats a bare "blog", so an agent whose
+        # broad trigger is a subset of another's precise one doesn't force a
+        # disambiguation prompt on every phrase.
+        def specificity(pair):
+            return max(len(_words(p)) for p in pair[1])
+        top = max(specificity(p) for p in fired)
+        winners = [p for p in fired if specificity(p) == top]
+        if len(winners) == 1:
+            a, phrases = winners[0]
+            best = max(phrases, key=lambda p: len(_words(p)))
+            why = f"trigger fired: {best!r} (most specific of {len(fired)} agents)"
+            return a, [{"agent": a, "score": 1.0, "matched": phrases}], why
+        # A real tie — two agents declare an equally specific trigger. No
+        # ranking can separate them; that's a duplicate-trigger problem in the
+        # agent frontmatter, so surface it rather than guessing.
+        cands = [{"agent": a, "score": 1.0, "matched": f} for a, f in winners]
+        return None, cands, "multiple agents declare an equally specific trigger"
 
     cands = suggestions(agents, term)
     if not cands:

@@ -97,7 +97,7 @@ You are MANDATED to load the `memory-agent` and follow its instructions whenever
 -
 
 
-**Version:** 2.8.0
+**Version:** 2.8.1
 **Last Updated:** 2026-08-13
 
 💡 *To check for a newer version, compare this `Version` against the latest release tag (`github.com/ProfSynapse/Professor-Synapse/releases/latest`). Load `references/update-protocol.md` for safe update instructions — it pulls the canonical repo as a codeload tarball and preserves your `memory/` store.*
