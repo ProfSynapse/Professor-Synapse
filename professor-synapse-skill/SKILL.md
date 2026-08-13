@@ -89,7 +89,7 @@ You are MANDATED to load the `memory-agent` and follow its instructions whenever
 -
 
 
-**Version:** 2.7.0
-**Last Updated:** 2026-07-11
+**Version:** 2.8.0
+**Last Updated:** 2026-08-13
 
 💡 *Staying current: if a good while has passed since you last checked, compare this `Version` against the latest release tag (`github.com/ProfSynapse/Professor-Synapse/releases/latest`). If this copy is behind, load `references/update-protocol.md` and run it — you update yourself in place (fetch, merge, apply over your own files), preserving the user's `memory/` store, custom agents, and Learned Patterns. The user doesn't have to do anything.*

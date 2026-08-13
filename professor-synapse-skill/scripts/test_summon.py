@@ -25,7 +25,7 @@ AGENT_A = """---
 name: alpha-agent
 emoji: 🅰️
 description: Handles alpha tasks and widget research
-triggers: alpha, widget, research
+triggers: alpha, widget, research, widget audit
 ---
 
 # 🅰️: Alpha
@@ -44,13 +44,29 @@ AGENT_B = """---
 name: beta-agent
 emoji: 🅱️
 description: Handles beta concerns
-triggers: beta, gizmo
+triggers: beta, gizmo, forget this
 ---
 
 # 🅱️: Beta
 
 ## INSTRUCTIONS
 Do beta things.
+"""
+
+# Shaped like the agent from the reported mis-route: its triggers contain the
+# generic words "tracker" and "doc" as parts of multi-word phrases, and its
+# slug contains "formatter" so a raw substring scorer scores "for" against it.
+GAMMA_AGENT = """---
+name: gamma-agent
+emoji: 📋
+description: Formats the weekly team meeting agenda doc from raw notes
+triggers: weekly agenda, meeting doc, gizmo tracker, team sync
+---
+
+# 📋: Gamma
+
+## INSTRUCTIONS
+Format the weekly agenda.
 """
 
 SKILL = """---
@@ -105,26 +121,147 @@ class SummonTest(unittest.TestCase):
 
     def test_exact_slug_resolves(self):
         agents = summon.load_agents(self.root)
-        a, cands = summon.resolve_agent(agents, "beta-agent")
+        a, cands, why = summon.resolve_agent(agents, "beta-agent")
         self.assertEqual(a["slug"], "beta-agent")
+        self.assertEqual(why, "exact slug")
 
     def test_fuzzy_trigger_resolves(self):
         agents = summon.load_agents(self.root)
-        a, _ = summon.resolve_agent(agents, "I need widget research")
+        a, _, why = summon.resolve_agent(agents, "I need widget research")
         self.assertEqual(a["slug"], "alpha-agent")
+        self.assertIn("trigger fired", why)
 
     def test_no_match_returns_none(self):
         agents = summon.load_agents(self.root)
-        a, cands = summon.resolve_agent(agents, "underwater basketweaving")
+        a, cands, _ = summon.resolve_agent(agents, "underwater basketweaving")
         self.assertIsNone(a)
         self.assertEqual(cands, [])
 
     def test_ambiguous_tie_returns_candidates(self):
         agents = summon.load_agents(self.root)
-        # "research beta" hits alpha (research) and beta (beta) equally -> tie.
-        a, cands = summon.resolve_agent(agents, "research beta")
+        # "research beta" fires a full trigger on BOTH agents -> abstain.
+        a, cands, why = summon.resolve_agent(agents, "research beta")
         self.assertIsNone(a)
-        self.assertEqual({c["slug"] for c in cands}, {"alpha-agent", "beta-agent"})
+        self.assertEqual({c["agent"]["slug"] for c in cands}, {"alpha-agent", "beta-agent"})
+        self.assertIn("multiple", why)
+
+    # -- strict routing: no summon without a definite signal -----------------
+
+    def test_partial_trigger_words_do_not_summon(self):
+        """The reported bug: an agent whose triggers contain "gizmo tracker"
+        must NOT be summoned by a task that merely says "tracker"."""
+        self._write("agents/gamma-agent.md", GAMMA_AGENT)
+        agents = summon.load_agents(self.root)
+        a, cands, why = summon.resolve_agent(
+            agents, "create Teachable lesson build tracker doc for Welcome Flow course")
+        self.assertIsNone(a)
+        self.assertIn("full trigger", why)
+        # It may still be *suggested* — it must simply not be adopted.
+        self.assertNotIn("gamma-agent", [c["agent"]["slug"] for c in cands if c["score"] >= 0.5])
+
+    def test_short_fragment_query_does_not_summon(self):
+        """Short queries are where coverage scoring is least trustworthy:
+        "lesson tracker doc" covers a lot of a short query without meaning it."""
+        self._write("agents/gamma-agent.md", GAMMA_AGENT)
+        agents = summon.load_agents(self.root)
+        a, _, _ = summon.resolve_agent(agents, "build a lesson tracker doc")
+        self.assertIsNone(a)
+
+    def test_substring_is_not_a_match(self):
+        """Matching is word-boundary. The old scorer tested `tok in hay`
+        against the joined blurb, so `format` scored against `formats` (and
+        `for` against `formatter`) — free points for prepositions."""
+        self._write("agents/gamma-agent.md", GAMMA_AGENT)
+        agents = summon.load_agents(self.root)
+        gamma = next(a for a in agents if a["slug"] == "gamma-agent")
+        self.assertIn("formats", summon._agent_words(gamma))     # the whole word is there
+        by_slug = {r["agent"]["slug"]: r for r in summon.score_agents(agents, "format")}
+        self.assertEqual(by_slug["gamma-agent"]["score"], 0.0)   # ...but `format` != `formats`
+        self.assertEqual(summon.score_agents(agents, "for the of to"), [])  # stopwords only
+
+    def test_multiword_trigger_needs_every_word(self):
+        agents = summon.load_agents(self.root)
+        alpha = next(a for a in agents if a["slug"] == "alpha-agent")
+        # AGENT_A has the multi-word trigger "widget audit".
+        self.assertEqual(summon.fired_triggers(alpha, summon._words("run a widget audit")),
+                         ["widget", "widget audit"])
+        self.assertEqual(summon.fired_triggers(alpha, summon._words("schedule an audit")), [])
+
+    def test_trigger_with_stopwords_still_fires(self):
+        """Trigger matching runs on RAW words. If it ran on stopword-filtered
+        tokens, "forget this" could never fire."""
+        agents = summon.load_agents(self.root)
+        beta = next(a for a in agents if a["slug"] == "beta-agent")
+        self.assertIn("forget this", summon.fired_triggers(beta, summon._words("forget this, it was wrong")))
+        a, _, why = summon.resolve_agent(agents, "forget this, it was wrong")
+        self.assertEqual(a["slug"], "beta-agent")
+        self.assertIn("forget this", why)
+
+    def test_stopword_only_query_scores_nothing(self):
+        agents = summon.load_agents(self.root)
+        a, cands, _ = summon.resolve_agent(agents, "please can you help me with the")
+        self.assertIsNone(a)
+        self.assertEqual(cands, [])
+
+    def test_single_agent_roster_still_scores(self):
+        """Regression: textbook idf log(N/df) is 0 for every term when N==1,
+        collapsing the denominator to zero and abstaining on everything."""
+        os.remove(os.path.join(self.root, "agents", "beta-agent.md"))
+        agents = summon.load_agents(self.root)
+        self.assertEqual(len(agents), 1)
+        ranked = summon.score_agents(agents, "widget questions")
+        self.assertEqual(len(ranked), 1)
+        self.assertGreater(ranked[0]["score"], 0.0)
+        # An exact trigger still summons on a one-agent roster.
+        a, _, _ = summon.resolve_agent(agents, "I need widget research")
+        self.assertEqual(a["slug"], "alpha-agent")
+
+    def test_scores_are_ranked_and_bounded(self):
+        agents = summon.load_agents(self.root)
+        ranked = summon.score_agents(agents, "widget gizmo research")
+        self.assertEqual([r["agent"]["slug"] for r in ranked][0], "alpha-agent")
+        for r in ranked:
+            self.assertGreaterEqual(r["score"], 0.0)
+            self.assertLessEqual(r["score"], 1.0)
+
+    # -- confidence is visible to the caller --------------------------------
+
+    def test_markdown_shows_why_matched(self):
+        out, code = self.run_cli("I need widget research", "--no-reinforce")
+        self.assertEqual(code, 0)
+        self.assertIn("# Summoned: 🅰️ alpha-agent", out)
+        self.assertIn("Matched by: trigger fired", out)
+
+    def test_markdown_exact_slug_omits_why(self):
+        out, _ = self.run_cli("alpha-agent", "--no-reinforce")
+        self.assertNotIn("Matched by:", out)
+
+    def test_abstain_markdown_lists_scored_candidates(self):
+        self._write("agents/gamma-agent.md", GAMMA_AGENT)
+        out, code = self.run_cli("build a lesson tracker doc")
+        self.assertEqual(code, 0)              # candidates exist -> not a hard no-match
+        self.assertIn("No confident match", out)
+        self.assertNotIn("# Summoned:", out)   # the whole point
+        self.assertIn("| Agent | Score | Matched on |", out)
+        self.assertIn("`gamma-agent`", out)
+
+    def test_abstain_json_carries_scores(self):
+        self._write("agents/gamma-agent.md", GAMMA_AGENT)
+        out, code = self.run_cli("build a lesson tracker doc", "--json")
+        d = json.loads(out)
+        self.assertFalse(d["matched"])
+        self.assertIn("reason", d)
+        self.assertTrue(d["candidates"])
+        top = d["candidates"][0]
+        self.assertIn("slug", top)
+        self.assertIsInstance(top["score"], float)
+        self.assertIn("matched", top)
+
+    def test_match_json_carries_reason(self):
+        out, _ = self.run_cli("I need widget research", "--no-reinforce", "--json")
+        d = json.loads(out)
+        self.assertTrue(d["matched"])
+        self.assertIn("trigger fired", d["reason"])
 
     # -- resources ----------------------------------------------------------
 
@@ -168,7 +305,7 @@ class SummonTest(unittest.TestCase):
     def test_default_query_falls_back_to_triggers(self):
         out, code = self.run_cli("alpha-agent", "--no-reinforce", "--json")
         d = json.loads(out)
-        self.assertEqual(d["query"], ["alpha", "widget", "research"])
+        self.assertEqual(d["query"], ["alpha", "widget", "research", "widget audit"])
 
     def test_no_match_exit_code(self):
         out, code = self.run_cli("underwater basketweaving")
