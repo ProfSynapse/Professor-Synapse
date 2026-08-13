@@ -40,7 +40,7 @@ The summoner is **strict on purpose**: it adopts an agent only on a definite sig
 `summon.py` tells you which case you're in:
 
 - **No confident match** — some agents share words with the task but none matched a full trigger. You get a scored table of the near-misses. **Nothing was summoned.**
-- **Multiple full triggers fired** — more than one agent genuinely matched. It lists them and exits without picking.
+- **Multiple full triggers fired** — more than one agent genuinely matched, with equally specific triggers. It lists them and exits without picking. (When one agent's trigger is *more specific* than another's — `gizmo tracker` against a bare `gizmo` — the longer phrase wins and that agent is summoned, since a broad trigger that is a subset of a precise one is not a real ambiguity. A true tie means two agents declare the same phrase, which is a duplicate-trigger problem to fix in their frontmatter.)
 - **No match at all** — nothing overlapped. It lists the existing agents and points you at agent creation (exit code `3`).
 
 In the first two cases, pick a way forward:

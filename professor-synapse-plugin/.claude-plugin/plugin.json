@@ -1,6 +1,6 @@
 {
   "name": "professor-synapse",
-  "version": "3.6.0",
+  "version": "3.6.1",
   "description": "Professor Synapse — a router that summons expert agents on demand, with persistent agent-tagged memory and a summon-gate that keeps work on-persona. Your own agents and memory live in the plugin's data dir and survive updates.",
   "author": {
     "name": "Joseph Rosenbaum",

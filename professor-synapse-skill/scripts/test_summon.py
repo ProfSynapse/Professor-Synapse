@@ -69,6 +69,22 @@ triggers: weekly agenda, meeting doc, gizmo tracker, team sync
 Format the weekly agenda.
 """
 
+# Declares a trigger phrase IDENTICAL to one of gamma's, to exercise the
+# genuine-tie branch: no ranking can separate two agents claiming "gizmo
+# tracker", so the summoner must abstain and say so.
+DELTA_AGENT = """---
+name: delta-agent
+emoji: 🔺
+description: Also claims to track gizmos
+triggers: delta, gizmo tracker
+---
+
+# 🔺: Delta
+
+## INSTRUCTIONS
+Do delta things.
+"""
+
 SKILL = """---
 name: test-skill
 ---
@@ -158,6 +174,30 @@ class SummonTest(unittest.TestCase):
         self.assertIn("full trigger", why)
         # It may still be *suggested* — it must simply not be adopted.
         self.assertNotIn("gamma-agent", [c["agent"]["slug"] for c in cands if c["score"] >= 0.5])
+
+    def test_more_specific_trigger_wins(self):
+        """A broad trigger that is a SUBSET of a precise one must not force a
+        disambiguation prompt: beta declares "gizmo", gamma declares the more
+        specific "gizmo tracker". The longer complete phrase is stronger
+        evidence of intent, so gamma is adopted."""
+        self._write("agents/gamma-agent.md", GAMMA_AGENT)
+        agents = summon.load_agents(self.root)
+        a, _, why = summon.resolve_agent(agents, "update the gizmo tracker")
+        self.assertIsNotNone(a)
+        self.assertEqual(a["slug"], "gamma-agent")
+        self.assertIn("most specific", why)
+
+    def test_equally_specific_triggers_abstain(self):
+        """Two agents declaring the SAME trigger phrase is a data problem in
+        the frontmatter, not something ranking can resolve. Surface it."""
+        self._write("agents/gamma-agent.md", GAMMA_AGENT)
+        self._write("agents/delta-agent.md", DELTA_AGENT)
+        agents = summon.load_agents(self.root)
+        a, cands, why = summon.resolve_agent(agents, "update the gizmo tracker")
+        self.assertIsNone(a)
+        self.assertIn("equally specific", why)
+        self.assertEqual({c["agent"]["slug"] for c in cands},
+                         {"gamma-agent", "delta-agent"})
 
     def test_short_fragment_query_does_not_summon(self):
         """Short queries are where coverage scoring is least trustworthy:
