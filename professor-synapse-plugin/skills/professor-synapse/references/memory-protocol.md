@@ -172,6 +172,28 @@ immediately. (`memory.py` resolves the data dir automatically; pass
 If code execution is unavailable, you cannot write; tell the user and offer the
 memory as text (`render`).
 
+## Rescued stores
+
+If a `<data_root>/rescued-store-*/` directory exists, an earlier version resolved
+the data dir differently for hooks than for model-run scripts, and some sessions'
+memory landed outside the live store. The SessionStart hook **copies** what it
+finds there; nothing is lost and the live store is untouched.
+
+Merging is yours to do, and it is a judgement call rather than a bulk import —
+two stores that diverged can hold contradictory records, and the rescued one may
+be the more current on some topics and stale on others. Read it without
+disturbing it:
+
+```bash
+python3 scripts/memory.py read   --root <data_root>/rescued-store-<source>
+python3 scripts/memory.py search --root <data_root>/rescued-store-<source> "<terms>"
+```
+
+Then re-save what is still true into the live store the normal way (no `--root`),
+keeping each record's original agent tag. Ask the user about anything the two
+stores disagree on. When nothing is left worth keeping, delete the rescued
+directory — that is what stops the session-start notice.
+
 ## Integrity
 
 Writes to `memory.json` validate, back up to `memory.json.bak`, and replace atomically, so a bad write cannot land. If `read` reports trouble, run `validate --fix` (safe mechanical repairs only) and `doctor` for the db.

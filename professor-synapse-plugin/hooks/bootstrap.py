@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""SessionStart hook: prepare the data dir and inject routing context.
+"""SessionStart hook: prepare the data dir, rescue stray stores, inject context.
 
-Two jobs at session start:
+Three jobs at session start:
   1. Ensure the writable data dirs exist: <data_root>/agents and
      <data_root>/memory. summon.py/memory.py also create these on demand, but
      pre-creating means a brand-new install has somewhere for the user's first
      agent and first memory to land without a race.
-  2. Inject context so the model knows the ABSOLUTE path to summon.py. This is
+  2. Rescue a memory store that an earlier version wrote to the wrong directory
+     (see _rescue). This runs here because a hook is the only component that
+     gets $CLAUDE_PLUGIN_DATA injected, so it alone knows which store is live.
+  3. Inject context so the model knows the ABSOLUTE path to summon.py. This is
      essential: model-invoked Bash does NOT receive ${CLAUDE_PLUGIN_ROOT}, so
      without this the model cannot reliably locate the script to run it. We emit
      the resolved path plus the one-line protocol.
@@ -26,6 +29,11 @@ try:
     import _hookpaths
 except Exception:
     _hookpaths = None
+
+try:
+    import _rescue
+except Exception:
+    _rescue = None
 
 
 def main() -> int:
@@ -53,7 +61,16 @@ def main() -> int:
         except Exception:
             pass
 
-    # 2. Inject routing context with absolute, runnable paths.
+    # 2. Recover a store an earlier version wrote somewhere else, before a
+    #    plugin update replaces the directory holding it. Never fatal.
+    rescued = ""
+    if _rescue is not None:
+        try:
+            rescued = _rescue.notice(_rescue.rescue(data, skill))
+        except Exception:
+            rescued = ""
+
+    # 3. Inject routing context with absolute, runnable paths.
     context = (
         "Professor Synapse plugin is active. Route every task through Professor "
         "Synapse: summon the owning agent BEFORE task work (recall, reading task "
@@ -78,6 +95,8 @@ def main() -> int:
         "A user file shadows a shipped one of the same relative path, and nothing "
         "here is touched when the plugin core updates."
     )
+    if rescued:
+        context = rescued + "\n\n" + context
     out = {
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
