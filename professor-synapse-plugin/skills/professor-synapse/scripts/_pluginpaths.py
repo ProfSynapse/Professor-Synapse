@@ -19,7 +19,8 @@ Resolution order:
          ->  ~/.claude/plugins/data/<plugin>-<marketplace>/
      (matches how Claude Code names the data dir; no env var needed.)
   3. Glob <plugins>/data/<plugin>-*  — marketplace-name agnostic; used if (2)'s exact
-     layout assumption ever shifts but a single data dir for this plugin still exists.
+     layout assumption ever shifts. On multiple matches (e.g. a stale dir from an
+     earlier install flavor) the most recently modified dir wins — see _glob_data.
   4. In-place fallback: the skill root itself — so the very same files keep working as
      a plain portable skill (or in a dev checkout) with no plugin involved.
 
@@ -66,13 +67,26 @@ def _derive_from_cache(here: Path):
 
 
 def _glob_data(here: Path):
-    """Find exactly one <plugins>/data/<plugin>-* dir, else None."""
+    """Find the <plugins>/data/<plugin>-* dir; on ambiguity prefer the live one.
+
+    Ambiguity happens in the wild: a stale leftover data dir from an earlier
+    install flavor (e.g. <plugin>-inline) can sit beside the live
+    <plugin>-<marketplace> dir. Returning None in that case silently sends
+    model-side writes (the summon marker, the memory store) to the in-place
+    fallback while hooks — which get $CLAUDE_PLUGIN_DATA injected — keep
+    reading the real data dir: the summon-gate never opens and the memory
+    store forks. Prefer the most recently modified match instead — the live
+    dir keeps receiving hook writes, so recency identifies it."""
     plugins_root = _plugins_root_from(here.parts) or (Path.home() / ".claude" / "plugins")
     data_root = plugins_root / "data"
     if not data_root.is_dir():
         return None
     matches = sorted(p for p in data_root.glob(f"{PLUGIN_NAME}-*") if p.is_dir())
-    return matches[0] if len(matches) == 1 else None
+    if not matches:
+        return None
+    if len(matches) > 1:
+        matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return matches[0]
 
 
 def resolve_data_root(skill_root) -> str:
