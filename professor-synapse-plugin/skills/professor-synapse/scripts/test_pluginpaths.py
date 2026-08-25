@@ -140,13 +140,103 @@ class TestResolveDataRoot(DataRootTestCase):
 
     def test_glob_result_is_used_when_the_cache_layout_does_not_derive(self):
         live = self.make_data_dir("mkt", created=1000.0)
-        with mock.patch.object(_pluginpaths, "_derive_from_cache", return_value=None):
-            with mock.patch.object(_pluginpaths, "Path") as fake_path:
-                fake_path.side_effect = Path
-                fake_path.home.return_value = self.tmp
-                fake_path.return_value = self.here
+        with mock.patch.object(_pluginpaths, "__file__", str(self.here)):
+            with mock.patch.object(_pluginpaths, "_derive_from_cache", return_value=None):
                 got = _pluginpaths.resolve_data_root(str(self.skill_root))
         self.assertEqual(got, str(live))
+
+
+class TestCacheLayoutDetection(unittest.TestCase):
+    """Step 2 recognises the plugin cache layout — and refuses look-alikes."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="ps-cachesplit-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+
+    def script_at(self, *segments):
+        here = self.tmp.joinpath(*segments)
+        here.parent.mkdir(parents=True, exist_ok=True)
+        return here
+
+    def test_real_install_derives_the_data_dir(self):
+        here = self.script_at(".claude", "plugins", "cache", "mkt", PLUGIN, "3.6.0",
+                              "skills", PLUGIN, "scripts", "_pluginpaths.py")
+        self.assertEqual(
+            _pluginpaths._derive_from_cache(here),
+            self.tmp / ".claude" / "plugins" / "data" / f"{PLUGIN}-mkt",
+        )
+
+    def test_a_checkout_under_a_dir_named_cache_is_not_a_plugin_install(self):
+        """'cache' is an ordinary directory name.
+
+        Without corroboration this path derives a data dir out of thin air and
+        step 2 returns it unchecked — so a dev checkout silently writes its
+        memory store to ~/cache/../data/ instead of in place.
+        """
+        here = self.script_at("cache", "projects", "Professor-Synapse",
+                              "professor-synapse-plugin", "skills", PLUGIN,
+                              "scripts", "_pluginpaths.py")
+        self.assertIsNone(_pluginpaths._derive_from_cache(here))
+        self.assertIsNone(_pluginpaths._plugins_root_from(here.parts))
+
+    def test_a_renamed_root_still_resolves_via_its_data_dir(self):
+        """Evidence, not just the name: a root holding data/ counts."""
+        here = self.script_at(".claude", "pkgs", "cache", "mkt", PLUGIN, "3.6.0",
+                              "skills", PLUGIN, "scripts", "_pluginpaths.py")
+        self.assertIsNone(_pluginpaths._derive_from_cache(here))   # no corroboration yet
+        (self.tmp / ".claude" / "pkgs" / "data").mkdir(parents=True)
+        self.assertEqual(
+            _pluginpaths._derive_from_cache(here),
+            self.tmp / ".claude" / "pkgs" / "data" / f"{PLUGIN}-mkt",
+        )
+
+    def test_cache_at_the_path_root_is_rejected(self):
+        self.assertIsNone(_pluginpaths._derive_from_cache(Path("/cache/mkt/x/y.py")))
+
+    def test_cache_with_nothing_under_it_is_rejected(self):
+        """No <marketplace>/<plugin> to read: there is nothing to derive from."""
+        here = self.script_at(".claude", "plugins", "cache", "_pluginpaths.py")
+        self.assertIsNone(_pluginpaths._derive_from_cache(here))
+
+
+class TestPredictedNameIsVerified(DataRootTestCase):
+    """Step 2 predicts a NAME. The prediction has to survive contact with disk."""
+
+    def resolve(self):
+        with mock.patch.object(_pluginpaths, "__file__", str(self.here)):
+            return _pluginpaths.resolve_data_root(str(self.skill_root))
+
+    def test_correct_prediction_is_used(self):
+        live = self.make_data_dir("mkt", created=1000.0)
+        self.assertEqual(self.resolve(), str(live))
+
+    def test_drifted_name_resolves_to_the_twin_beside_it(self):
+        """Claude Code wrote a name our _sanitize mirror does not reproduce."""
+        now = 1_700_000_000.0
+        twin = self.make_data_dir("MKT", created=now, used=now)      # cased differently
+        self.assertFalse((self.plugins / "data" / f"{PLUGIN}-mkt").exists())
+        self.assertEqual(self.resolve(), str(twin))
+
+    def test_unrelated_leftover_is_never_adopted(self):
+        """The regression a bare existence-check-then-glob would introduce.
+
+        First run of a new install: nothing of ours exists yet, but a stale dir
+        from an older flavor does. Adopting it forks the store against the dir
+        the bootstrap hook is about to create.
+        """
+        now = 1_700_000_000.0
+        self.make_data_dir("inline", created=now - 30 * DAY, used=now - 60.0)
+        predicted = self.plugins / "data" / f"{PLUGIN}-mkt"
+        self.assertEqual(self.resolve(), str(predicted))
+
+    def test_punctuation_drift_matches_but_a_different_marketplace_does_not(self):
+        now = 1_700_000_000.0
+        self.make_data_dir("other-mkt", created=now, used=now)
+        self.assertEqual(self.resolve(), str(self.plugins / "data" / f"{PLUGIN}-mkt"))
+        twin = self.make_data_dir("m_k_t", created=now, used=now)
+        self.assertEqual(_pluginpaths._normalize(twin.name),
+                         _pluginpaths._normalize(f"{PLUGIN}-mkt"))
+        self.assertEqual(self.resolve(), str(twin))
 
 
 if __name__ == "__main__":
